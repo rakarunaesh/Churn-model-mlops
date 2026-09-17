@@ -24,13 +24,13 @@ spec:
         app: streamlit-app
         component: frontend
     spec:
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: streamlit
-          # No imagePullSecrets needed - ECR pulls are authorized via the
-          # EKS node IAM role, unlike the DockerHub images elsewhere in this
-          # project. Replace <ACCOUNT_ID> once the ECR repo exists; CI does
-          # not build/push this image yet (see note below).
-          image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/churn-model-streamlit:latest
+          # Replaced by CI (streamlit-ci.yaml) with the git-SHA-tagged image
+          # on every build touching streamlit_app/**.
+          image: docker.io/rakarun/churn-ui:latest
           imagePullPolicy: Always
           ports:
             - name: http

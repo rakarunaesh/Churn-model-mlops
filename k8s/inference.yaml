@@ -24,6 +24,15 @@ metadata:
 spec:
   predictor:
     serviceAccountName: sa-s3-access
+    # DockerHub image - requires a pull secret (unlike ECR, which EKS node
+    # IAM roles can pull without one). Create it in this namespace first:
+    #   kubectl create secret docker-registry regcred \
+    #     --docker-server=docker.io \
+    #     --docker-username=<dockerhub-username> \
+    #     --docker-password=<dockerhub-token> \
+    #     -n churn-model
+    imagePullSecrets:
+      - name: regcred
     initContainers:
       - name: fetch-model
         image: amazon/aws-cli:2.15.0
@@ -41,7 +50,7 @@ spec:
     containers:
       - name: churn-predictor
         # Replaced by CI with the git-SHA-tagged image on every build.
-        image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/churn-model:latest
+        image: docker.io/rakarun/churn-model:latest
         imagePullPolicy: Always
         ports:
           - containerPort: 8000

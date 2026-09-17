@@ -8,7 +8,6 @@ on:
 env:
   AWS_REGION: us-east-1
   S3_BUCKET: your-churn-model-bucket
-  ECR_REPOSITORY: churn-model
 
 jobs:
   data-processing:
@@ -114,29 +113,34 @@ jobs:
         aws s3 cp models/preprocessor.pkl s3://${{ env.S3_BUCKET }}/models/preprocessor.pkl
         echo "Model and preprocessor pushed to S3"
 
-    - name: Login to Amazon ECR
-      id: ecr-login
-      uses: aws-actions/amazon-ecr-login@v2
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-    - name: Build, tag and push image to ECR
-      env:
-        ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-      run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+    - name: Log in to DockerHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: docker.io
+        username: ${{ vars.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          docker.io/${{ vars.DOCKERHUB_USERNAME }}/churn-model:latest
+          docker.io/${{ vars.DOCKERHUB_USERNAME }}/churn-model:${{ github.sha }}
 
     - name: Update inference.yaml with new image tag
       # The S3 URIs in churn-model-config are static (fixed keys, overwritten
       # each run) - what actually changes per build is the container image,
       # so that's what gets patched into the manifest for ArgoCD to pick up.
-      env:
-        ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
       run: |
-        NEW_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+        NEW_IMAGE="docker.io/${{ vars.DOCKERHUB_USERNAME }}/churn-model:${{ github.sha }}"
         # Match only the churn-model image line - the initContainer's
         # amazon/aws-cli image must not be touched by this.
-        sed -i "s|image: .*/${ECR_REPOSITORY}:.*|image: $NEW_IMAGE|g" k8s/inference.yaml
+        sed -i "s|image: .*/churn-model:.*|image: $NEW_IMAGE|g" k8s/inference.yaml
 
     - name: Commit updated inference.yaml
       run: |
