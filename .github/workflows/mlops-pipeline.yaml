@@ -1,0 +1,147 @@
+name: MLOps Pipeline
+
+on:
+  push:
+    branches: [cicd]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: your-churn-model-bucket
+  ECR_REPOSITORY: churn-model
+
+jobs:
+  data-processing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download raw data from S3
+        run: |
+          mkdir -p data
+          aws s3 cp s3://${{ env.S3_BUCKET }}/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv data/raw_churn_data.csv
+
+      - name: Process data
+        run: |
+          python process_data.py --input data/raw_churn_data.csv --output data/cleaned_churn_data.csv
+
+      - name: Engineer features
+        run: |
+          mkdir -p models
+          python engineer.py --input data/cleaned_churn_data.csv --output data/featured_churn_data.csv --preprocessor models/preprocessor.pkl
+
+      - name: Upload processed data
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-data
+          path: data/featured_churn_data.csv
+
+      - name: Upload preprocessor
+        uses: actions/upload-artifact@v4
+        with:
+          name: preprocessor
+          path: models/preprocessor.pkl
+
+  train-and-deploy:
+    needs: data-processing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to push commits
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}  # Use built-in token
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Download processed data
+      uses: actions/download-artifact@v4
+      with:
+        name: processed-data
+        path: data/
+
+    - name: Download preprocessor
+      uses: actions/download-artifact@v4
+      with:
+        name: preprocessor
+        path: models/
+
+    - name: Train model
+      # Hosted runners can't reach the in-cluster DNS name
+      # (mlflow-server.mlflow.svc.cluster.local) - use the external ingress
+      # URL from deployment/mlflow/k8s instead.
+      env:
+        MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+      run: python train.py
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Push model and preprocessor to S3
+      run: |
+        aws s3 cp models/churn_model.pkl s3://${{ env.S3_BUCKET }}/models/churn_model.pkl
+        aws s3 cp models/preprocessor.pkl s3://${{ env.S3_BUCKET }}/models/preprocessor.pkl
+        echo "Model and preprocessor pushed to S3"
+
+    - name: Login to Amazon ECR
+      id: ecr-login
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag and push image to ECR
+      env:
+        ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+    - name: Update inference.yaml with new image tag
+      # The S3 URIs in churn-model-config are static (fixed keys, overwritten
+      # each run) - what actually changes per build is the container image,
+      # so that's what gets patched into the manifest for ArgoCD to pick up.
+      env:
+        ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+      run: |
+        NEW_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+        # Match only the churn-model image line - the initContainer's
+        # amazon/aws-cli image must not be touched by this.
+        sed -i "s|image: .*/${ECR_REPOSITORY}:.*|image: $NEW_IMAGE|g" k8s/inference.yaml
+
+    - name: Commit updated inference.yaml
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add k8s/inference.yaml
+        git commit -m "Update model image tag [skip ci]" || echo "No changes"
+        git push || echo "No changes to push"

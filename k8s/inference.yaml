@@ -1,0 +1,64 @@
+---
+# S3 locations for the model + preprocessor. Bucket must match the one used
+# by the GitHub Actions workflow (env.S3_BUCKET).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: churn-model-config
+  namespace: churn-model
+data:
+  MODEL_S3_URI: "s3://your-churn-model-bucket/models/churn_model.pkl"
+  PREPROCESSOR_S3_URI: "s3://your-churn-model-bucket/models/preprocessor.pkl"
+
+---
+# Custom-container predictor (not KServe's native `sklearn:` runtime) -
+# needed because inference here requires running the OneHotEncoder
+# preprocessor before the model, which the native runtime can't do. An
+# initContainer pulls both artifacts from S3 into a shared emptyDir volume
+# before the FastAPI app (api.py) starts and reads them via MODEL_DIR.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: churn-predictor
+  namespace: churn-model
+spec:
+  predictor:
+    serviceAccountName: sa-s3-access
+    initContainers:
+      - name: fetch-model
+        image: amazon/aws-cli:2.15.0
+        command: ["sh", "-c"]
+        args:
+          - |
+            aws s3 cp "$MODEL_S3_URI" /mnt/models/churn_model.pkl && \
+            aws s3 cp "$PREPROCESSOR_S3_URI" /mnt/models/preprocessor.pkl
+        envFrom:
+          - configMapRef:
+              name: churn-model-config
+        volumeMounts:
+          - name: model-storage
+            mountPath: /mnt/models
+    containers:
+      - name: churn-predictor
+        # Replaced by CI with the git-SHA-tagged image on every build.
+        image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/churn-model:latest
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 8000
+        env:
+          - name: MODEL_DIR
+            value: /mnt/models
+        volumeMounts:
+          - name: model-storage
+            mountPath: /mnt/models
+            readOnly: true
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+    volumes:
+      - name: model-storage
+        emptyDir: {}
