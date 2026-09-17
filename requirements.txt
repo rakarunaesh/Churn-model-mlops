@@ -1,9 +1,8 @@
+# Deps for the training pipeline (process_data.py, engineer.py, train.py).
+# api/requirements.txt has the separate, slimmer serving-only deps.
 pandas>=2.2.0
 numpy>=1.26.0
 scikit-learn>=1.5.0
-fastapi>=0.109.0
-uvicorn>=0.27.0
-pydantic>=2.5.0
 dvc>=3.38.0
 dvc-s3>=3.0.0
 boto3>=1.34.0

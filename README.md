@@ -39,21 +39,25 @@ This helps businesses **save customers proactively** instead of reacting after t
 
 ```
 churn-model/
-├── generate_data.py          # Generate synthetic churn dataset
-├── train.py                   # Train the model
-├── api.py                     # FastAPI inference server
-├── requirements.txt           # Python dependencies
-├── Dockerfile                 # Container image
-├── .dvc/config               # DVC configuration
-├── models/
-│   └── churn_model.pkl.dvc   # DVC metadata for model
+├── process_data.py            # Clean the raw Telco dataset
+├── engineer.py                # Feature engineering + preprocessor.pkl
+├── train.py                   # Train the model, log to MLflow
+├── requirements.txt           # Training pipeline dependencies
+├── api/
+│   ├── api.py                 # FastAPI inference server
+│   ├── requirements.txt       # Serving-only dependencies
+│   └── Dockerfile             # Container image (built with repo root as context)
+├── streamlit_app/
+│   └── app.py                 # Streamlit UI, calls the API
 ├── k8s/
-│   ├── deployment.yaml       # Kubernetes deployment
-│   └── inference.yaml        # KServe inference service
+│   ├── inference.yaml         # KServe custom-container InferenceService
+│   ├── streamlit-deployment.yaml
+│   └── serviceaccount.yaml    # Namespace + IRSA ServiceAccount
 ├── .github/workflows/
-│   └── mlops-pipeline.yaml   # GitHub Actions CI/CD
+│   ├── mlops-pipeline.yaml    # Data processing -> train -> build/push -> deploy
+│   └── streamlit-ci.yaml      # Streamlit image build/push
 └── argocd/
-    └── application.yaml      # ArgoCD application
+    └── application.yaml       # ArgoCD application
 ```
 
 ## MLOps Pipeline Steps
@@ -64,14 +68,15 @@ churn-model/
 # Install dependencies
 pip install -r requirements.txt
 
-# Generate dataset
-python generate_data.py
+# Process the raw Telco dataset (see data/README.md for where this comes from)
+python process_data.py --input data/raw_churn_data.csv --output data/cleaned_churn_data.csv
+python engineer.py --input data/cleaned_churn_data.csv --output data/featured_churn_data.csv --preprocessor models/preprocessor.pkl
 
 # Train model
 python train.py
 
 # Test API locally
-python api.py
+cd api && pip install -r requirements.txt && python api.py
 # Visit http://localhost:8000/docs
 ```
 
