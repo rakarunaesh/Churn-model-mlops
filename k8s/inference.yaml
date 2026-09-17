@@ -9,6 +9,7 @@ metadata:
 data:
   MODEL_S3_URI: "s3://your-churn-model-bucket/models/churn_model.pkl"
   PREPROCESSOR_S3_URI: "s3://your-churn-model-bucket/models/preprocessor.pkl"
+  MODEL_DIR: "/mnt/models"
 
 ---
 # Custom-container predictor (not KServe's native `sklearn:` runtime) -
@@ -54,9 +55,9 @@ spec:
         imagePullPolicy: Always
         ports:
           - containerPort: 8000
-        env:
-          - name: MODEL_DIR
-            value: /mnt/models
+        envFrom:
+          - configMapRef:
+              name: churn-model-config
         volumeMounts:
           - name: model-storage
             mountPath: /mnt/models

@@ -6,8 +6,10 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1
-  S3_BUCKET: your-churn-model-bucket
+  # Set these as repo Variables (Settings -> Secrets and variables -> Actions
+  # -> Variables) rather than editing this file.
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
 
 jobs:
   data-processing:
