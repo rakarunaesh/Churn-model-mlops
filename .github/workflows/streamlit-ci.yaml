@@ -2,7 +2,7 @@ name: Streamlit CI
 
 on:
   push:
-    branches: [cicd]
+    branches: [main]
     paths:
       - 'streamlit_app/**'
   workflow_dispatch:
@@ -43,12 +43,12 @@ jobs:
           NEW_IMAGE="docker.io/${{ vars.DOCKERHUB_USERNAME }}/churn-ui:${{ github.sha }}"
           # Match only the streamlit image line - this file has no other
           # containers, but stay precise in case that changes later.
-          sed -i "s|image: .*/churn-ui:.*|image: $NEW_IMAGE|g" k8s/streamlit-deployment.yaml
+          sed -i "s|image: .*/churn-ui:.*|image: $NEW_IMAGE|g" deployment/k8s/app/streamlit-deployment.yaml
 
       - name: Commit updated streamlit-deployment.yaml
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add k8s/streamlit-deployment.yaml
+          git add deployment/k8s/app/streamlit-deployment.yaml
           git commit -m "Update streamlit image tag [skip ci]" || echo "No changes"
           git push || echo "No changes to push"

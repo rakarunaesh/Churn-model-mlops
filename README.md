@@ -49,15 +49,25 @@ churn-model/
 │   └── Dockerfile             # Container image (built with repo root as context)
 ├── streamlit_app/
 │   └── app.py                 # Streamlit UI, calls the API
-├── k8s/
-│   ├── inference.yaml         # KServe custom-container InferenceService
-│   ├── streamlit-deployment.yaml
-│   └── serviceaccount.yaml    # Namespace + IRSA ServiceAccount
+├── deployment/
+│   ├── k8s/
+│   │   ├── app/               # ArgoCD-managed - the actual application
+│   │   │   ├── inference.yaml         # KServe custom-container InferenceService
+│   │   │   ├── streamlit-deployment.yaml
+│   │   │   └── serviceaccount.yaml    # Namespace + IRSA ServiceAccount
+│   │   └── infra/              # Cluster-wide/CI concerns, applied manually
+│   │       ├── github-runner.yaml
+│   │       ├── cluster-issuer.yaml
+│   │       ├── cluster-issuer-zerossl.yaml
+│   │       └── sc.yml
+│   ├── argocd/
+│   │   └── application.yaml    # ArgoCD application (watches deployment/k8s/app)
+│   └── mlflow/                 # MLflow Helm chart values
 ├── .github/workflows/
 │   ├── mlops-pipeline.yaml    # Data processing -> train -> build/push -> deploy
 │   └── streamlit-ci.yaml      # Streamlit image build/push
-└── argocd/
-    └── application.yaml       # ArgoCD application
+└── docs/
+    └── POD_IDENTITY_SETUP.txt # Reference notes, not applied to the cluster
 ```
 
 ## MLOps Pipeline Steps
@@ -140,11 +150,11 @@ kind create cluster --name churn-model
 kubectl apply -f https://github.com/kserve/kserve/releases/download/v0.11.0/kserve.yaml
 
 # Create namespace, ServiceAccount and S3 secret for KServe
-# Update k8s/serviceaccount.yaml with your AWS credentials first
-kubectl apply -f k8s/serviceaccount.yaml
+# Update deployment/k8s/app/serviceaccount.yaml with your AWS credentials first
+kubectl apply -f deployment/k8s/app/serviceaccount.yaml
 
 # Deploy inference service
-kubectl apply -f k8s/inference.yaml
+kubectl apply -f deployment/k8s/app/inference.yaml
 
 # Check inference service
 kubectl get inferenceservice -n churn-model
@@ -153,7 +163,7 @@ kubectl get inferenceservice -n churn-model
 kubectl get inferenceservice churn-predictor -n churn-model -w
 ```
 
-**Important:** Before deploying, update `k8s/serviceaccount.yaml` with your actual AWS credentials.
+**Important:** Before deploying, update `deployment/k8s/app/serviceaccount.yaml` with your actual AWS credentials.
 
 ### 7. Test KServe Inference
 
@@ -208,7 +218,7 @@ kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
 # Deploy application
-kubectl apply -f argocd/application.yaml
+kubectl apply -f deployment/argocd/application.yaml
 
 # Access ArgoCD UI
 kubectl port-forward svc/argocd-server -n argocd 8080:443

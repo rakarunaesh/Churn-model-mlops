@@ -173,12 +173,12 @@ jobs:
           NEW_IMAGE="docker.io/${{ vars.DOCKERHUB_USERNAME }}/churn-model:${{ github.sha }}"
           # Match only the churn-model image line - the initContainer's
           # amazon/aws-cli image must not be touched by this.
-          sed -i "s|image: .*/churn-model:.*|image: $NEW_IMAGE|g" k8s/inference.yaml
+          sed -i "s|image: .*/churn-model:.*|image: $NEW_IMAGE|g" deployment/k8s/app/inference.yaml
 
       - name: Commit updated inference.yaml
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add k8s/inference.yaml
+          git add deployment/k8s/app/inference.yaml
           git commit -m "Update model image tag [skip ci]" || echo "No changes"
           git push || echo "No changes to push"

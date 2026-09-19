@@ -5,7 +5,10 @@ metadata:
   name: streamlit-config
   namespace: churn-model
 data:
-  API_URL: "http://churn-predictor.churn-model.svc.cluster.local"
+  # KServe auto-appends "-predictor" to the InferenceService name when
+  # creating the backing Service - confirmed via:
+  #   kubectl get svc -n churn-model -> churn-predictor-predictor
+  API_URL: "http://churn-predictor-predictor.churn-model.svc.cluster.local"
   APP_VERSION: "1.0.0"
 
 ---
@@ -80,7 +83,11 @@ metadata:
   labels:
     app: streamlit-app
 spec:
-  type: ClusterIP
+  # LoadBalancer instead of ClusterIP + Ingress - this nginx-ingress-controller
+  # install requires a host on every Ingress rule, so a host-less "access by
+  # any hostname" Ingress gets rejected. A LoadBalancer Service has no
+  # host-routing at all, so it works without a domain.
+  type: LoadBalancer
   ports:
     - name: http
       port: 80
@@ -89,29 +96,37 @@ spec:
   selector:
     app: streamlit-app
 
----
-# Plain HTTP, no TLS - fine for a demo app with no sensitive data. To add
-# TLS back later: re-add the cert-manager.io/cluster-issuer annotation
-# (letsencrypt-prod or zerossl-prod - see cluster-issuer*.yaml) and a `tls:`
-# block pointing at a Secret name, same as before.
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: streamlit-ingress
-  namespace: churn-model
-spec:
-  ingressClassName: nginx
-  rules:
-    # - host:  churn.karunaesh.2bd.net  # Commented out - access via NLB hostname. Uncomment + set domain to enable custom hostname
-    - http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: streamlit-app
-                port:
-                  number: 80
+# Ingress disabled - this nginx-ingress-controller install (NGINX Inc, not
+# the ingress-nginx community project) rejects any rule without a `host`
+# ("spec.rules[0].host: Required value"), so a host-less catch-all Ingress
+# never gets an address. Using the streamlit-app Service as type: LoadBalancer
+# directly instead - no host-routing needed, works without a domain.
+#
+# To switch back to Ingress once you have a real domain:
+# ---
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: streamlit-ingress
+#   namespace: churn-model
+#   annotations:
+#     cert-manager.io/cluster-issuer: letsencrypt-prod  # or zerossl-prod
+# spec:
+#   ingressClassName: nginx
+#   tls:
+#     - hosts: ["your-domain.com"]
+#       secretName: churn-streamlit-tls
+#   rules:
+#     - host: your-domain.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: streamlit-app
+#                 port:
+#                   number: 80
 
 ---
 apiVersion: autoscaling/v2
