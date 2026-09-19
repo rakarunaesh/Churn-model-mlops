@@ -51,6 +51,14 @@ jobs:
           mkdir -p models/trained
           python engineer.py --input data/processed/cleaned_churn_data.csv --output data/processed/featured_churn_data.csv --preprocessor models/trained/preprocessor.pkl
 
+      - name: Push processed data to S3
+        # Persists cleaned/featured data for versioning - the upload-artifact
+        # steps below only pass data between jobs in this run, they don't
+        # persist anywhere once the workflow run expires.
+        run: |
+          aws s3 cp data/processed/cleaned_churn_data.csv s3://${{ env.S3_BUCKET }}/data/processed/cleaned_churn_data.csv
+          aws s3 cp data/processed/featured_churn_data.csv s3://${{ env.S3_BUCKET }}/data/processed/featured_churn_data.csv
+
       - name: Upload processed data
         uses: actions/upload-artifact@v4
         with:
