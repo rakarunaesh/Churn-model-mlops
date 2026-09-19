@@ -41,7 +41,7 @@ spec:
         - name: streamlit
           # Replaced by CI (streamlit-ci.yaml) with the git-SHA-tagged image
           # on every build touching streamlit_app/**.
-          image: docker.io/rakarun/churn-ui:2d13bf09aaf7421b6500716893252d478059731f
+          image: docker.io/rakarun/churn-ui:aa19d30c3a677ddf6e5526fa5ce56a5d1079a232
           imagePullPolicy: Always
           ports:
             - name: http
