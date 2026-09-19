@@ -13,7 +13,8 @@ env:
 
 jobs:
   data-processing:
-    runs-on: mlops-ci-runner
+    # Only needs S3 access - no in-cluster network needed, hosted runner is fine
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -101,7 +102,7 @@ jobs:
 
   build-and-publish:
     needs: model-training
-    runs-on: mlops-ci-runner
+    runs-on: ubuntu-latest
     permissions:
       contents: write  # Required to push the manifest update commit
 
