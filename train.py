@@ -47,7 +47,15 @@ with mlflow.start_run():
 
     mlflow.log_metric("accuracy", accuracy)
     mlflow.log_metric("auc_roc", auc)
-    mlflow.sklearn.log_model(model, "model", registered_model_name="churn-predictor")
+    # RandomForest's tree storage is flagged "untrusted" by skops (MLflow's
+    # newer, safer default serializer vs. raw pickle) since a maliciously
+    # crafted file could pass out-of-bounds node indices. Safe here since we
+    # just trained this model ourselves.
+    mlflow.sklearn.log_model(
+        model, "model",
+        registered_model_name="churn-predictor",
+        skops_trusted_types=["sklearn.tree._tree.Tree"],
+    )
 
 # Save locally too - this is what gets pushed to S3 for KServe to serve,
 # and what the Dockerfile bakes in for standalone/local api.py testing.
