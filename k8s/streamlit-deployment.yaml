@@ -34,8 +34,6 @@ spec:
         app: streamlit-app
         component: frontend
     spec:
-      imagePullSecrets:
-        - name: regcred
       containers:
         - name: streamlit
           # Replaced by CI (streamlit-ci.yaml) with the git-SHA-tagged image
@@ -92,24 +90,20 @@ spec:
     app: streamlit-app
 
 ---
-# Replace churn.yourdomain.com with your real subdomain, same pattern as the
-# Streamlit/MLflow ingresses in house-price-predictor - same nginx-ingress
-# controller and cert-manager ClusterIssuer.
+# Plain HTTP, no TLS - fine for a demo app with no sensitive data. To add
+# TLS back later: re-add the cert-manager.io/cluster-issuer annotation
+# (letsencrypt-prod or zerossl-prod - see cluster-issuer*.yaml) and a `tls:`
+# block pointing at a Secret name, same as before.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: streamlit-ingress
   namespace: churn-model
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
-  tls:
-    - hosts: ["churn.yourdomain.com"]
-      secretName: churn-streamlit-tls
   rules:
-    - host: churn.yourdomain.com
-      http:
+    # - host:  churn.karunaesh.2bd.net  # Commented out - access via NLB hostname. Uncomment + set domain to enable custom hostname
+    - http:
         paths:
           - path: /
             pathType: Prefix

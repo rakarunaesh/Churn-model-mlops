@@ -13,7 +13,7 @@ mlflow.set_experiment("churn-model")
 
 # Load feature-engineered data (produced by process_data.py + engineer.py -
 # already one-hot encoded, so every non-target column is a feature)
-df = pd.read_csv('data/featured_churn_data.csv')
+df = pd.read_csv('data/processed/featured_churn_data.csv')
 
 X = df.drop(columns=['Churn'])
 y = df['Churn']
@@ -51,7 +51,8 @@ with mlflow.start_run():
 
 # Save locally too - this is what gets pushed to S3 for KServe to serve,
 # and what the Dockerfile bakes in for standalone/local api.py testing.
-with open('models/churn_model.pkl', 'wb') as f:
+os.makedirs('models/trained', exist_ok=True)
+with open('models/trained/churn_model.pkl', 'wb') as f:
     pickle.dump(model, f)
 
-print("Model saved to models/churn_model.pkl")
+print("Model saved to models/trained/churn_model.pkl")

@@ -10,7 +10,7 @@ app = FastAPI()
 
 # Path overridable so the same image works whether the model is baked in
 # (local testing) or fetched from S3 into a mounted volume (KServe on EKS).
-MODEL_DIR = os.environ.get("MODEL_DIR", "models")
+MODEL_DIR = os.environ.get("MODEL_DIR", "models/trained")
 MODEL_PATH = os.path.join(MODEL_DIR, os.environ.get("MODEL_FILENAME", "churn_model.pkl"))
 PREPROCESSOR_PATH = os.path.join(MODEL_DIR, os.environ.get("PREPROCESSOR_FILENAME", "preprocessor.pkl"))
 

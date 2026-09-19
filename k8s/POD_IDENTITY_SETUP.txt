@@ -1,0 +1,173 @@
+================================================================================
+EKS Pod Identity IAM Setup - GitHub Runner Self-Hosted Runner
+================================================================================
+
+PREREQUISITES:
+- EKS cluster: churn-model-prod-mlops (ap-south-1)
+- AWS account: 020642896030
+- GitHub PAT secret in AWS Secrets Manager: github-runner-pat
+
+================================================================================
+STEP 1: Store GitHub PAT in AWS Secrets Manager
+================================================================================
+
+aws secretsmanager create-secret \
+  --name github-runner-pat \
+  --secret-string "<your-github-pat-token>" \
+  --region ap-south-1
+
+# Verify:
+aws secretsmanager get-secret-value --secret-id github-runner-pat --region ap-south-1
+
+
+================================================================================
+STEP 2: Create IAM Role with Pod Identity Trust Policy
+================================================================================
+
+# Set environment variables
+export ACCOUNT_ID="020642896030"
+export CLUSTER_NAME="churn-model-prod-mlops"
+export REGION="ap-south-1"
+
+# Delete any existing role (cleanup)
+aws iam list-attached-role-policies --role-name github-runner-pod-role --region ${REGION} 2>/dev/null | jq -r '.AttachedPolicies[].PolicyArn' | while read arn; do
+  aws iam detach-role-policy --role-name github-runner-pod-role --policy-arn "$arn" --region ${REGION}
+done
+aws iam delete-role --role-name github-runner-pod-role --region ${REGION} 2>/dev/null
+sleep 2
+
+# Create role with CORRECT Pod Identity trust policy
+# KEY: Must include BOTH sts:AssumeRole AND sts:TagSession
+# Service principal: pods.eks.amazonaws.com (no region suffix)
+aws iam create-role \
+  --role-name github-runner-pod-role \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"]}]}' \
+  --region ${REGION}
+
+# Verify role was created
+aws iam get-role --role-name github-runner-pod-role --region ${REGION}
+
+
+================================================================================
+STEP 3: Attach Secrets Manager Policy to Role
+================================================================================
+
+aws iam attach-role-policy \
+  --role-name github-runner-pod-role \
+  --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+
+================================================================================
+STEP 4: Create Pod Identity Association
+================================================================================
+
+# Links the Kubernetes ServiceAccount (github-runner-sa) to the IAM role
+# This is what actually delivers credentials to the pod
+aws eks create-pod-identity-association \
+  --cluster-name ${CLUSTER_NAME} \
+  --namespace github-runners \
+  --service-account github-runner-sa \
+  --role-arn arn:aws:iam::${ACCOUNT_ID}:role/github-runner-pod-role \
+  --region ${REGION}
+
+# Verify the association was created
+aws eks list-pod-identity-associations \
+  --cluster-name ${CLUSTER_NAME} \
+  --region ${REGION} \
+  --query 'associations[?serviceAccount==`github-runner-sa`]'
+
+
+================================================================================
+STEP 5: Apply Kubernetes Manifests
+================================================================================
+
+# Create namespace, SecretProviderClass, ServiceAccount, and Deployment
+kubectl apply -f k8s/github-runner.yaml
+
+# Watch the pod start
+kubectl get pods -n github-runners -w
+
+# Verify the secret was mounted from Secrets Manager
+kubectl exec -it <pod-name> -n github-runners -- cat /mnt/secrets/github-token
+# Should print your GitHub PAT
+
+
+================================================================================
+STEP 6: Verify Pod Identity Credentials Injected
+================================================================================
+
+# Pod Identity injects AWS credentials as environment variables
+kubectl exec -it <pod-name> -n github-runners -- env | grep -E 'AWS_CONTAINER|AWS_ROLE_ARN'
+
+# Expected output:
+# AWS_CONTAINER_AUTHORIZATION_TOKEN=<token>
+# AWS_CONTAINER_CREDENTIALS_FULL_URI=<uri>
+# AWS_ROLE_ARN=arn:aws:iam::020642896030:role/github-runner-pod-role
+
+
+================================================================================
+STEP 7: Update GitHub Actions Workflows
+================================================================================
+
+# In .github/workflows/mlops-pipeline.yaml, change ALL three jobs from:
+#   runs-on: ubuntu-latest
+# to:
+#   runs-on: mlops-ci-runner
+
+# Example:
+# jobs:
+#   data-processing:
+#     runs-on: mlops-ci-runner
+#   model-training:
+#     runs-on: mlops-ci-runner
+#   build-and-publish:
+#     runs-on: mlops-ci-runner
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+# If pod is stuck in ImagePullBackOff:
+kubectl logs -n github-runners -f deployment/github-runner
+
+# If secret mount fails:
+kubectl describe pod <pod-name> -n github-runners
+# Check Events section for CSI driver errors
+
+# If credentials not injected:
+# Pod Identity webhook must run in kube-system namespace
+kubectl get pods -n kube-system | grep pod-identity-agent
+
+# To restart runner after credential rotation:
+kubectl rollout restart deployment/github-runner -n github-runners
+
+# To verify role ARN in pod:
+kubectl exec -it <pod-name> -n github-runners -- aws sts get-caller-identity
+# Should show the github-runner-pod-role ARN
+
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+1. Pod Identity is the NEWER approach (replaces IRSA)
+   - No OIDC provider needed
+   - No ServiceAccount annotations needed
+   - Association lives in EKS API, not on the Kubernetes object
+
+2. The trust policy MUST have both actions:
+   - sts:AssumeRole
+   - sts:TagSession
+   (sts:TagSession is what makes it Pod Identity-compatible)
+
+3. GitHub runner auto-registers after pod starts
+   - Check repo Settings → Actions → Runners for "mlops-ci-runner"
+
+4. Runner can now reach in-cluster resources:
+   - MLflow: http://mlflow-server.mlflow.svc.cluster.local:5000
+   - Set MLFLOW_TRACKING_URI to this in CI environment
+
+5. Secrets Manager rotation:
+   - Update secret: aws secretsmanager update-secret --secret-id github-runner-pat --secret-string "<new-token>"
+   - Restart pod: kubectl rollout restart deployment/github-runner -n github-runners

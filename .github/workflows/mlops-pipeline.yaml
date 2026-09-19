@@ -13,7 +13,7 @@ env:
 
 jobs:
   data-processing:
-    runs-on: ubuntu-latest
+    runs-on: mlops-ci-runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -37,33 +37,34 @@ jobs:
 
       - name: Download raw data from S3
         run: |
-          mkdir -p data
-          aws s3 cp s3://${{ env.S3_BUCKET }}/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv data/raw_churn_data.csv
+          mkdir -p data/raw
+          aws s3 cp s3://${{ env.S3_BUCKET }}/data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
 
       - name: Process data
         run: |
-          python process_data.py --input data/raw_churn_data.csv --output data/cleaned_churn_data.csv
+          mkdir -p data/processed
+          python process_data.py --input data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv --output data/processed/cleaned_churn_data.csv
 
       - name: Engineer features
         run: |
-          mkdir -p models
-          python engineer.py --input data/cleaned_churn_data.csv --output data/featured_churn_data.csv --preprocessor models/preprocessor.pkl
+          mkdir -p models/trained
+          python engineer.py --input data/processed/cleaned_churn_data.csv --output data/processed/featured_churn_data.csv --preprocessor models/trained/preprocessor.pkl
 
       - name: Upload processed data
         uses: actions/upload-artifact@v4
         with:
           name: processed-data
-          path: data/featured_churn_data.csv
+          path: data/processed/featured_churn_data.csv
 
       - name: Upload preprocessor
         uses: actions/upload-artifact@v4
         with:
           name: preprocessor
-          path: models/preprocessor.pkl
+          path: models/trained/preprocessor.pkl
 
   model-training:
     needs: data-processing
-    runs-on: ubuntu-latest
+    runs-on: mlops-ci-runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -82,12 +83,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: processed-data
-          path: data/
+          path: data/processed/
 
       - name: Train model
-        # Hosted runners can't reach the in-cluster DNS name
-        # (mlflow-server.mlflow.svc.cluster.local) - use the external ingress
-        # URL from deployment/mlflow/k8s instead.
+        # Self-hosted runner can reach the in-cluster MLflow via internal DNS.
+        # Set MLFLOW_TRACKING_URI variable to:
+        # http://mlflow-server.mlflow.svc.cluster.local:5000
         env:
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
         run: python train.py
@@ -96,11 +97,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trained-model
-          path: models/churn_model.pkl
+          path: models/trained/churn_model.pkl
 
   build-and-publish:
     needs: model-training
-    runs-on: ubuntu-latest
+    runs-on: mlops-ci-runner
     permissions:
       contents: write  # Required to push the manifest update commit
 
@@ -114,13 +115,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: trained-model
-          path: models/
+          path: models/trained/
 
       - name: Download preprocessor
         uses: actions/download-artifact@v4
         with:
           name: preprocessor
-          path: models/
+          path: models/trained/
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -131,8 +132,8 @@ jobs:
 
       - name: Push model and preprocessor to S3
         run: |
-          aws s3 cp models/churn_model.pkl s3://${{ env.S3_BUCKET }}/models/churn_model.pkl
-          aws s3 cp models/preprocessor.pkl s3://${{ env.S3_BUCKET }}/models/preprocessor.pkl
+          aws s3 cp models/trained/churn_model.pkl s3://${{ env.S3_BUCKET }}/models/trained/churn_model.pkl
+          aws s3 cp models/trained/preprocessor.pkl s3://${{ env.S3_BUCKET }}/models/trained/preprocessor.pkl
           echo "Model and preprocessor pushed to S3"
 
       - name: Set up Docker Buildx

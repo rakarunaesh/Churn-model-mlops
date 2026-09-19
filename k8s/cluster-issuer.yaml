@@ -1,0 +1,18 @@
+---
+# Cluster-scoped - only needs to exist once for the whole cluster, not
+# per-project. Any Ingress in any namespace (churn-model, mlops-prod, mlflow)
+# can reference it via cert-manager.io/cluster-issuer: letsencrypt-prod.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: karunaesh@gmail.com  # Let's Encrypt sends renewal/expiry notices here
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx

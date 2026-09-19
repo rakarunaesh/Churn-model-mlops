@@ -1,0 +1,34 @@
+---
+# Alternative to letsencrypt-prod (cluster-issuer.yaml) - a separate CA with
+# its own independent rate-limit pool, unaffected by Let's Encrypt's
+# per-registered-domain limit on shared domains like 2bd.net.
+#
+# Prerequisites before applying:
+#   1. Free signup at https://zerossl.com
+#   2. Developer/API section -> "Generate EAB Credentials" -> gives you a
+#      KID and an HMAC Key
+#   3. Create the secret holding the HMAC key, in cert-manager's own
+#      namespace (confirm the name with: kubectl get pods -A | grep cert-manager):
+#        kubectl create secret generic zerossl-eab-secret \
+#          --from-literal=hmac-key=<your-hmac-key-from-zerossl> \
+#          -n cert-manager
+#   4. Replace <your-EAB-KID-from-zerossl> below with your real KID
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: zerossl-prod
+spec:
+  acme:
+    server: https://acme.zerossl.com/v2/DV90
+    email: karunaesh@gmail.com
+    externalAccountBinding:
+      keyID: ZGaUCMg3slilon-qvzWuJw
+      keySecretRef:
+        name: zerossl-eab-secret
+        key: hmac-key
+    privateKeySecretRef:
+      name: zerossl-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx

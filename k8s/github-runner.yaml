@@ -1,0 +1,97 @@
+---
+# Namespace for GitHub Actions self-hosted runner
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: github-runners
+
+---
+# The github-runner-token Secret is deliberately NOT defined here.
+# Manage it imperatively only, so `kubectl apply -f` on this file can never
+# overwrite the real token with a placeholder (this bit us once already):
+#
+#   kubectl create secret generic github-runner-token \
+#     --from-literal=GITHUB_TOKEN="<your-github-pat>" -n github-runners
+#
+# To rotate the token later:
+#   kubectl delete secret github-runner-token -n github-runners
+#   kubectl create secret generic github-runner-token \
+#     --from-literal=GITHUB_TOKEN="<new-token>" -n github-runners
+#   kubectl rollout restart deployment/github-runner -n github-runners
+
+---
+# ServiceAccount - bound to IAM role via Pod Identity
+# The IAM role was created separately via:
+#   aws eks create-pod-identity-association \
+#     --cluster-name churn-model-prod-mlops \
+#     --namespace github-runners \
+#     --service-account github-runner-sa \
+#     --role-arn arn:aws:iam::020642896030:role/github-runner-pod-role
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-runner-sa
+  namespace: github-runners
+
+---
+# Deployment - GitHub Actions self-hosted runner
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-runner
+  namespace: github-runners
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-runner
+  template:
+    metadata:
+      labels:
+        app: github-runner
+    spec:
+      serviceAccountName: github-runner-sa
+      containers:
+      - name: runner
+        image: myoung34/github-runner:latest
+        imagePullPolicy: Always
+        env:
+        # GitHub repository URL - REPLACE with your repo
+        - name: REPO_URL
+          value: "https://github.com/rakarunaesh/Churn-model-mlops"
+        # Repo-level runner (not org/enterprise) - required, image branches its
+        # registration flow on this
+        - name: RUNNER_SCOPE
+          value: "repo"
+        # GitHub PAT from Kubernetes Secret - must be ACCESS_TOKEN, not
+        # RUNNER_TOKEN. ACCESS_TOKEN makes the entrypoint exchange the PAT for
+        # a short-lived registration token via GitHub's API first.
+        # RUNNER_TOKEN means "this is already that short-lived token" and
+        # skips the exchange - passing a PAT there hits the wrong endpoint
+        # (that's the "POST .../actions/runner-registration" 404 we saw).
+        - name: ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: github-runner-token
+              key: GITHUB_TOKEN
+        # Working directory for CI jobs
+        - name: RUNNER_WORKDIR
+          value: "/tmp/runner-work"
+        # Runner name (shows in GitHub Actions UI)
+        - name: RUNNER_NAME
+          value: "mlops-ci-runner"
+        volumeMounts:
+        # Working directory for job artifacts
+        - name: work-dir
+          mountPath: /tmp/runner-work
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+      volumes:
+      # Ephemeral working directory
+      - name: work-dir
+        emptyDir: {}

@@ -1,5 +1,6 @@
-models/*.pkl
-data/*.csv
+models/trained/*.pkl
+data/raw/*.csv
+data/processed/*.csv
 *.pyc
 __pycache__/
 .dvc/cache
