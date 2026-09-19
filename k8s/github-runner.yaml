@@ -80,6 +80,12 @@ spec:
         # Runner name (shows in GitHub Actions UI)
         - name: RUNNER_NAME
           value: "mlops-ci-runner"
+        # Custom label - `runs-on:` in workflows matches LABELS, not the name.
+        # Without this, the runner only carries the default labels
+        # (self-hosted, linux, x64) and `runs-on: mlops-ci-runner` never
+        # matches anything - jobs hang forever on "Waiting for a runner".
+        - name: LABELS
+          value: "mlops-ci-runner"
         volumeMounts:
         # Working directory for job artifacts
         - name: work-dir
