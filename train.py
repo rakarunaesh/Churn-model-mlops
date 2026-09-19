@@ -3,9 +3,9 @@ import os
 import pandas as pd
 import pickle
 import mlflow
-import mlflow.sklearn
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+import mlflow.xgboost
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score, roc_auc_score
 
 mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
@@ -23,17 +23,44 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-n_estimators = 100
 random_state = 42
+
+# Churn is ~27% positive - tell XGBoost to weight the minority class instead
+# of optimizing for raw accuracy, which a naive model can game by always
+# predicting "no churn".
+scale_pos_weight = (y_train == 0).sum() / (y_train == 1).sum()
+
+param_distributions = {
+    "n_estimators": [100, 200, 300, 400],
+    "max_depth": [3, 4, 5, 6, 7],
+    "learning_rate": [0.01, 0.05, 0.1, 0.2],
+    "subsample": [0.7, 0.8, 0.9, 1.0],
+    "colsample_bytree": [0.7, 0.8, 0.9, 1.0],
+    "min_child_weight": [1, 3, 5],
+}
 
 with mlflow.start_run():
     mlflow.set_tag("git.sha", os.environ.get("GITHUB_SHA", "local"))
-    mlflow.log_param("n_estimators", n_estimators)
-    mlflow.log_param("random_state", random_state)
+    mlflow.log_param("scale_pos_weight", scale_pos_weight)
 
-    # Train
-    model = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
-    model.fit(X_train, y_train)
+    search = RandomizedSearchCV(
+        XGBClassifier(
+            random_state=random_state,
+            scale_pos_weight=scale_pos_weight,
+            eval_metric="logloss",
+        ),
+        param_distributions=param_distributions,
+        n_iter=20,
+        scoring="roc_auc",
+        cv=5,
+        random_state=random_state,
+        n_jobs=-1,
+    )
+    search.fit(X_train, y_train)
+    model = search.best_estimator_
+
+    mlflow.log_params(search.best_params_)
+    mlflow.log_metric("cv_best_auc_roc", search.best_score_)
 
     # Evaluate
     y_pred = model.predict(X_test)
@@ -42,20 +69,14 @@ with mlflow.start_run():
     accuracy = accuracy_score(y_test, y_pred)
     auc = roc_auc_score(y_test, y_proba)
 
+    print(f"Best params: {search.best_params_}")
+    print(f"CV best AUC-ROC: {search.best_score_:.4f}")
     print(f"Accuracy: {accuracy:.4f}")
     print(f"AUC-ROC: {auc:.4f}")
 
     mlflow.log_metric("accuracy", accuracy)
     mlflow.log_metric("auc_roc", auc)
-    # RandomForest's tree storage is flagged "untrusted" by skops (MLflow's
-    # newer, safer default serializer vs. raw pickle) since a maliciously
-    # crafted file could pass out-of-bounds node indices. Safe here since we
-    # just trained this model ourselves.
-    mlflow.sklearn.log_model(
-        model, "model",
-        registered_model_name="churn-predictor",
-        skops_trusted_types=["sklearn.tree._tree.Tree"],
-    )
+    mlflow.xgboost.log_model(model, "model", registered_model_name="churn-predictor")
 
 # Save locally too - this is what gets pushed to S3 for KServe to serve,
 # and what the Dockerfile bakes in for standalone/local api.py testing.
