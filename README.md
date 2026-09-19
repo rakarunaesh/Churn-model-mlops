@@ -12,7 +12,7 @@ This project separates **Build-Time (CI/CD)** from **Runtime (Kubernetes)** via 
 
 ### High-Level Architecture Diagram
 
-![MLOps Architecture](./mlops_arch.png)
+![MLOps Architecture](./assets/mlops_arch.png)
 
 **Key architectural highlights:**
 - **Build-Time**: Data processing (hosted runner) → Model training (self-hosted runner, in-cluster for MLflow access) → Docker build → Manifest commit
@@ -520,7 +520,7 @@ dvc repro  # Runs all stages, skips unchanged steps
 
 ### Streamlit UI Screenshot
 
-![Streamlit Prediction UI](./Screenshot\ From\ 2026-09-19\ 22-29-29.png)
+![Streamlit Prediction UI](./assets/streamlit-ui-demo.png)
 
 The UI accepts 19 Telco customer fields (gender, tenure, monthly charges, internet service, contract type, etc.) and returns:
 - **Prediction:** "Likely to Churn" or "Likely to Stay"
