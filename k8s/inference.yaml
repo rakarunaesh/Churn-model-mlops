@@ -42,7 +42,7 @@ spec:
     containers:
       - name: churn-predictor
         # Replaced by CI with the git-SHA-tagged image on every build.
-        image: docker.io/rakarun/churn-model:latest
+        image: docker.io/rakarun/churn-model:568021aafef3961a440b193c73b0101cb825e0c7
         imagePullPolicy: Always
         ports:
           - containerPort: 8000
