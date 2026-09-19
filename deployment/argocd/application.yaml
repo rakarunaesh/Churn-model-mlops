@@ -3,6 +3,14 @@ kind: Application
 metadata:
   name: churn-model
   namespace: argocd
+  annotations:
+    # KServe's admission webhook injects defaults onto the InferenceService
+    # spec (minReplicas, scaleTarget, containerConcurrency, timeouts, etc.)
+    # that aren't in this repo's YAML. A naive text diff sees those as drift
+    # and flags OutOfSync right after every successful sync, even when the
+    # actual fields we manage (image tag) match. Server-side diff uses the
+    # API server's dry-run to account for webhook-injected defaults properly.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
 spec:
   project: default
   source:
